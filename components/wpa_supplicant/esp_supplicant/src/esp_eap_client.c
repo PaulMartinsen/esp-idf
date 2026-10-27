@@ -365,7 +365,7 @@ int eap_sm_process_request(struct eap_sm *sm, struct wpabuf *reqData)
     struct eap_hdr *ehdr;
     const struct eap_method *m = NULL;
     struct wpabuf *resp = NULL;
-    struct eap_method_ret m_res;
+    struct eap_method_ret m_res = { 0 };
     int ret = 0;
 
     if (reqData == NULL || wpabuf_len(reqData) < sizeof(*ehdr)) {
@@ -384,8 +384,6 @@ int eap_sm_process_request(struct eap_sm *sm, struct wpabuf *reqData)
         resp = sm->lastRespData;
         goto send_resp;
     }
-
-    sm->current_identifier = ehdr->identifier;
 
     pos = (u8 *)(ehdr + 1);
     type = *pos++;
@@ -459,19 +457,22 @@ build_nak:
     }
 send_resp:
     if (resp == NULL) {
+        if (m_res.ignore) {
+            return ESP_OK;
+        }
         wpa_printf(MSG_ERROR, "Response build fail, return.");
         wpabuf_free(sm->lastRespData);
         sm->lastRespData = resp;
         wpa2_set_eap_state(WPA2_ENT_EAP_STATE_FAIL);
         return WPA2_ENT_EAP_STATE_FAIL;
     }
+    sm->current_identifier = ehdr->identifier;
     ret = eap_sm_send_eapol(sm, resp);
     if (resp != sm->lastRespData) {
         wpabuf_free(sm->lastRespData);
     }
     if (ret != ESP_OK) {
-        wpabuf_free(resp);
-        resp = NULL;
+        wpa_printf(MSG_ERROR, "EAP: Failed to send EAPOL response, ret=%d", ret);
         if (ret == WPA_ERR_INVALID_BSSID) {
             ret = WPA2_ENT_EAP_STATE_FAIL;
             wpa2_set_eap_state(WPA2_ENT_EAP_STATE_FAIL);
@@ -610,6 +611,9 @@ static int eap_sm_rx_eapol_internal(u8 *src_addr, u8 *buf, u32 len, uint8_t *bss
         /* Handle EAP-reauthentication case */
         if (sm->finish_state == WPA2_ENT_EAP_STATE_SUCCESS) {
             wpa_printf(MSG_INFO, "EAP Re-authentication in progress");
+            wpabuf_free(sm->lastRespData);
+            sm->lastRespData = NULL;
+            sm->current_identifier = 0xff;
             wpa2_set_eap_state(WPA2_ENT_EAP_STATE_IN_PROGRESS);
         }
 
@@ -633,11 +637,15 @@ static int eap_sm_rx_eapol_internal(u8 *src_addr, u8 *buf, u32 len, uint8_t *bss
             ret = WPA2_ENT_EAP_STATE_FAIL;
             wpa2_set_eap_state(WPA2_ENT_EAP_STATE_FAIL);
         }
+        wpabuf_free(sm->lastRespData);
+        sm->lastRespData = NULL;
         break;
     case EAP_CODE_FAILURE:
         wpa_printf(MSG_INFO, ">>>>>EAP FAILED");
         ret = WPA2_ENT_EAP_STATE_FAIL;
         wpa2_set_eap_state(WPA2_ENT_EAP_STATE_FAIL);
+        wpabuf_free(sm->lastRespData);
+        sm->lastRespData = NULL;
         break;
     }
 _out:

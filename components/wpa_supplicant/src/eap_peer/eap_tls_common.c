@@ -848,14 +848,21 @@ const u8 * eap_peer_tls_process_init(struct eap_sm *sm,
 		tls_msg_len = WPA_GET_BE32(pos);
 		wpa_printf(MSG_DEBUG, "SSL: TLS Message Length: %d",
 			   tls_msg_len);
+		pos += 4;
+		left -= 4;
+		if (data->tls_in_left == 0 && tls_msg_len > left &&
+		    !(*flags & EAP_TLS_FLAGS_MORE_FRAGMENTS)) {
+			wpa_printf(MSG_INFO, "SSL: Incomplete TLS message "
+				   "without more fragments flag");
+			ret->ignore = TRUE;
+			return NULL;
+		}
 		if (data->tls_in_left == 0) {
 			data->tls_in_total = tls_msg_len;
 			data->tls_in_left = tls_msg_len;
 			wpabuf_free(data->tls_in);
 			data->tls_in = NULL;
 		}
-		pos += 4;
-		left -= 4;
 
 		if (left > tls_msg_len) {
 			wpa_printf(MSG_INFO, "SSL: TLS Message Length (%d "
